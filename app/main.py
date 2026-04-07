@@ -23,16 +23,20 @@ from app.analytics import (
     total_deposit,
     total_withdrawal,
 )
-from app.llm import check_ollama_health, generate_response
-from app.prompts import SMART_BANKING_PROMPT
+from app.llm import check_ollama_health
 from app.retriever import health_check as retriever_health_check
-from app.retriever import search
 
 
+# =========================================================
+# PAGE SETUP
+# =========================================================
 st.set_page_config(page_title="Smart Banking Assistant", layout="wide")
 st.title("🏦 Smart Banking Assistant")
 
 
+# =========================================================
+# HELPERS
+# =========================================================
 def detect_txn_type(query: str) -> str | None:
     q = query.lower().strip()
     mapping = {
@@ -62,9 +66,11 @@ def format_daywise_summary(df, title: str) -> str:
         date_str = row["Tran Date"].strftime("%d-%b-%Y")
         deposit = row.get("Deposit", 0)
         withdrawal = row.get("Withdrawal", 0)
+
         lines.append(
             f"- **{date_str}** → Deposit ₹ {deposit:,.2f} | Withdrawal ₹ {withdrawal:,.2f}"
         )
+
     return "\n".join(lines)
 
 
@@ -77,32 +83,27 @@ def format_single_column_daywise(df, title: str, value_col: str, emoji: str) -> 
         date_str = row["Tran Date"].strftime("%d-%b-%Y")
         value = row[value_col]
         lines.append(f"- **{date_str}** → {emoji} ₹ {value:,.2f}")
+
     return "\n".join(lines)
 
 
-def safe_rag_answer(query: str) -> str:
-    is_ollama_ok, ollama_msg = check_ollama_health()
-    if not is_ollama_ok:
-        return f"❌ {ollama_msg}"
-
-    is_qdrant_ok, qdrant_msg = retriever_health_check()
-    if not is_qdrant_ok:
-        return f"❌ {qdrant_msg}"
-
-    docs = search(query, limit=8)
-    context = "\n\n".join(docs) if docs else "No matching data found."
-    prompt = SMART_BANKING_PROMPT.format(context=context, question=query)
-    return generate_response(prompt)
-
-
+# =========================================================
+# SIDEBAR HEALTH CHECK
+# =========================================================
 with st.sidebar:
     st.subheader("System Health")
+
     ollama_ok, ollama_msg = check_ollama_health()
     qdrant_ok, qdrant_msg = retriever_health_check()
+
     st.write(f"**Ollama:** {'✅' if ollama_ok else '❌'} {ollama_msg}")
     st.write(f"**Qdrant:** {'✅' if qdrant_ok else '❌'} {qdrant_msg}")
     st.caption("Run: ollama serve, then python ingest.py")
 
+
+# =========================================================
+# DASHBOARD
+# =========================================================
 st.subheader("📊 Dashboard")
 
 try:
@@ -115,6 +116,7 @@ try:
 
     chart_df = daily.copy()
     chart_df["Tran Date"] = chart_df["Tran Date"].astype(str)
+
     st.line_chart(chart_df.set_index("Tran Date")[["Deposit", "Withdrawal", "Profit"]])
 
     with st.expander("📅 Daily Breakdown"):
@@ -140,6 +142,10 @@ try:
 except Exception as e:
     st.warning(f"Dashboard error: {e}")
 
+
+# =========================================================
+# CHAT SECTION
+# =========================================================
 st.subheader("💬 Ask your data")
 
 if "chat" not in st.session_state:
@@ -160,6 +166,9 @@ if query:
     try:
         q = query.lower().strip()
 
+        # -------------------------------------------------
+        # RULE-BASED QUICK RESPONSES
+        # -------------------------------------------------
         if "day" in q and "upi" in q and "deposit" in q:
             answer = format_single_column_daywise(
                 get_upi_deposit_daily(),
@@ -178,6 +187,7 @@ if query:
 
         elif "day" in q:
             txn_type = detect_txn_type(q)
+
             if txn_type:
                 answer = format_daywise_summary(
                     get_transaction_daily_summary(txn_type),
@@ -194,9 +204,7 @@ if query:
             answer = f"### 💰 Total UPI Deposit\n\n₹ {get_upi_deposit_total():,.2f}"
 
         elif "upi withdrawal" in q or "upi debit" in q:
-            answer = (
-                f"### 💸 Total UPI Withdrawal\n\n₹ {get_upi_withdrawal_total():,.2f}"
-            )
+            answer = f"### 💸 Total UPI Withdrawal\n\n₹ {get_upi_withdrawal_total():,.2f}"
 
         elif "total deposit" in q:
             answer = f"### 💰 Total Deposit\n\n₹ {total_deposit():,.2f}"
@@ -214,6 +222,9 @@ if query:
                 [f"- {t}" for t in txn_types]
             )
 
+        # -------------------------------------------------
+        # DATE + INSIGHTS ROUTING (NEW 🔥)
+        # -------------------------------------------------
         elif (
             "financial insights" in q
             or "where am i losing money" in q
@@ -222,14 +233,31 @@ if query:
             or "financial health" in q
             or "recommendation" in q
             or "recommendations" in q
+            or "last 7 days" in q
+            or "last 30 days" in q
+            or "this month" in q
+            or "march" in q
+            or "april" in q
+            or "may" in q
+            or "june" in q
+            or "july" in q
+            or "august" in q
+            or "september" in q
+            or "october" in q
+            or "november" in q
+            or "december" in q
         ):
             answer = run_agent(query)
 
+        # -------------------------------------------------
+        # DEFAULT → AGENT
+        # -------------------------------------------------
         else:
             answer = run_agent(query)
 
+        # Safety fallback
         if not answer or not str(answer).strip():
-            answer = "⚠️ No response generated. Please try a more specific query."
+            answer = "⚠️ No response generated. Try a more specific query."
 
     except Exception as e:
         answer = f"❌ {e}"

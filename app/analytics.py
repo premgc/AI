@@ -227,3 +227,16 @@ def export_csv(df: pd.DataFrame) -> bytes:
     if 'Tran Date' in export_df.columns:
         export_df['Tran Date'] = export_df['Tran Date'].astype(str)
     return export_df.to_csv(index=False).encode('utf-8')
+
+def filter_df_by_date(df, start, end):
+    if df is None or df.empty:
+        return df
+
+    df = df.copy()
+    df["Tran Date"] = df["Tran Date"]
+
+    return df[
+        (df["Tran Date"] >= start) &
+        (df["Tran Date"] <= end)
+    ]
+
